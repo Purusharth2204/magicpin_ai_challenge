@@ -129,9 +129,30 @@ async def reply(req: Request):
         return {"action":"end","rationale":"Merchant explicitly opted out; ending the conversation and suppressing future sends for this conversation."}
     if is_auto_reply(msg):
         c.auto_reply_count += 1
-        if c.auto_reply_count >= 3:
-            return {"action":"end","rationale":"Repeated canned WhatsApp auto-reply detected; exiting instead of burning additional turns."}
-        return {"action":"wait","wait_seconds":14400,"rationale":"Detected a canned WhatsApp auto-reply; backing off to wait for the owner rather than treating it as intent."}
+
+        # Track repeated auto-replies from the same merchant
+        auto_key = f"auto_reply_{mid}"
+
+        if not hasattr(store, "_auto_reply_counts"):
+          store._auto_reply_counts = {}
+
+        previous_auto_replies = store._auto_reply_counts.get(auto_key, 0)
+        store._auto_reply_counts[auto_key] = previous_auto_replies + 1
+
+        merchant_auto_count = store._auto_reply_counts[auto_key]
+
+        if merchant_auto_count >= 2:
+          c.ended = True
+          return {
+            "action": "end",
+            "rationale": "Repeated canned WhatsApp auto-reply detected from the same merchant; ending the conversation instead of continuing to wait."
+        }
+
+        return {
+            "action": "wait",
+            "wait_seconds": 14400,
+            "rationale": "Detected a canned WhatsApp auto-reply; backing off once to wait for the merchant instead of treating it as intent."
+        }
     if any(w in low for w in OFFTOPIC):
         # Stay on the current mission, using the last outbound body as thread anchor.
         return {"action":"send","body":"That’s outside what I can help with directly. Coming back to the item we were working on — want me to finish that next step?","cta":"open_ended","rationale":"Out-of-scope request is declined briefly and the conversation is redirected to the active Vera task."}
